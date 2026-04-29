@@ -49,20 +49,21 @@ COPY --from=deps /app/node_modules /app/node_modules
 # Copy application code
 COPY --chown=appuser:appgroup . /app
 
-# ⭐ 重要：设置工作目录
+# Set working directory
 WORKDIR /app
 
-# Health check
+# ⭐ 关键修复：覆盖默认 entrypoint，直接使用 node
+# 避免 docker-entrypoint.sh 改变工作目录导致的问题
+ENTRYPOINT ["node", "/app/index_official.js"]
+
+# Health check (使用 exec 格式，与 ENTRYPOINT 兼容)
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD node -e "const http=require('http');\
     const req=http.get('http://localhost:'+process.env.PORT+'/health',(r)=>{process.exit(r.statusCode===200?0:1)});\
-    req.on('error',()=>process.exit(1))" || exit 1
+    req.on('error',()=>process.exit(1))"
 
 # Switch to non-root user
 USER appuser
 
 # Expose port
 EXPOSE 3000
-
-# Start command
-CMD ["node", "index_official.js"]
