@@ -76,15 +76,20 @@ jobs:
           echo "✅ Docker image built and pushed to ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
           echo "📦 Available tags: ${{ steps.meta.outputs.tags }}"
 
-  # 可选：部署到 Railway
+  # 可选：自动部署到 Railway（通过 Webhook）
   deploy-to-railway:
     needs: build-and-push
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && secrets.RAILWAY_TOKEN != ''
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy to Railway
-        uses: railwayapp/action@v1.0.2
-        with:
-          command: deploy
-          token: ${{ secrets.RAILWAY_TOKEN }}
-          environment: production
+      - name: Deploy to Railway via API
+        run: |
+          curl -X POST "https://backboard.railway.app/api/v1/projects" \
+            -H "Authorization: Bearer ${{ secrets.RAILWAY_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "command": "deploy",
+              "serviceId": "${{ secrets.RAILWAY_SERVICE_ID }}"
+            }"
+        # 注意: Railway 的自动部署通常通过连接 GitHub 仓库实现
+        # 此步骤仅作示例，建议在 Railway 控制台直接连接 GitHub 仓库
