@@ -1,0 +1,41 @@
+# Git
+.git
+.gitignore
+.github
+
+# Node
+node_modules
+npm-debug.log
+yarn.lock
+package-lock.json
+
+# Docs
+README.md
+CHANGELOG.md
+docs
+
+# CI/CD
+.gitlab-ci.yml
+.travis.yml
+Dockerfile*
+docker-compose*
+.dockerignore
+railway.toml
+.github
+
+# 临时文件
+tmp/*
+!tmp/.gitkeep
+logs
+*.log
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# 测试
+test
+tests
+__tests__

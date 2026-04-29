@@ -1,0 +1,45 @@
+# Railway 部署配置
+# 文档: https://docs.railway.app/deploy/deployments
+
+[build]
+  builder = "docker"
+  dockerfile = "Dockerfile"
+
+[deploy]
+  restartPolicyType = "ON_FAILURE"
+  restartPolicyMaxRetries = 5
+  healthcheckPath = "/health"
+  healthcheckTimeout = 10
+  healthcheckInterval = 30
+
+[variables]
+  # Node.js 环境
+  NODE_ENV = "production"
+  PORT = "3000"
+
+  # rw2026 核心配置
+  CFIP = "cdns.doon.eu.org"              # 回退IP（保留）
+  CFPORT = "443"
+  UUID = "your-uuid-here"                # 必须修改！
+  NAME = "Railway-Node"                  # 节点名称前缀
+
+  # Argo 固定隧道配置
+  ARGO_PORT = "8001"
+  ARGO_DOMAIN = "your-tunnel.example.com"    # 必须修改！
+  ARGO_AUTH = "your-argo-token-or-json"      # 必须修改！
+
+  # ✨ 动态优选入口配置
+  USE_DYNAMIC_ENTRY = "true"                  # 启用动态优选
+  EDGETUNNEL_API = "https://your-worker.workers.dev/addressesapi.txt"  # 必须修改！
+
+  # 可选：上传配置
+  # UPLOAD_URL = ""
+  # PROJECT_URL = ""
+  # AUTO_ACCESS = "false"
+
+# 健康检查
+[healthcheck]
+  path = "/health"
+  interval = "30s"
+  timeout = "5s"
+  retries = 3

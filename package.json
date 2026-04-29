@@ -1,0 +1,26 @@
+{
+  "name": "rw2026-edgetunnel",
+  "version": "1.0.0",
+  "description": "rw2026 with dynamic edgetunnel integration for Cloudflare\u4f18\u9009IP",
+  "main": "index_official.js",
+  "scripts": {
+    "start": "node index_official.js",
+    "dev": "node index_official.js"
+  },
+  "keywords": [
+    "xray",
+    "cloudflare",
+    "vless",
+    "edgetunnel",
+    "proxy"
+  ],
+  "author": "adhd",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.7.7",
+    "express": "^4.18.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

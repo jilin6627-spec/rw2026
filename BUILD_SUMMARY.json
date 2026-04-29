@@ -1,0 +1,35 @@
+{
+  "image_name": "rw2026-edgetunnel",
+  "tags": [
+    "latest",
+    "v1.0.0"
+  ],
+  "platform": "linux/amd64, linux/arm64 (multi-platform ready)",
+  "base_image": "node:18-alpine",
+  "size_estimate": "~200-300MB (includes node_modules + binaries)",
+  "entrypoint": "node index_official.js",
+  "expose_port": 3000,
+  "healthcheck": "/health endpoint",
+  "key_features": [
+    "\u52a8\u6001\u4f18\u9009IP (edgetunnel API)",
+    "6\u5c0f\u65f6\u667a\u80fd\u7f13\u5b58",
+    "\u81ea\u52a8\u56de\u9000\u673a\u5236",
+    "\u5f69\u8272\u65e5\u5fd7\u7cfb\u7edf",
+    "\u4f18\u96c5\u505c\u673a\u5904\u7406",
+    "\u5b8c\u6574\u9519\u8bef\u5904\u7406"
+  ],
+  "environment_variables": {
+    "required": [
+      "UUID",
+      "ARGO_AUTH",
+      "ARGO_DOMAIN"
+    ],
+    "optional": [
+      "USE_DYNAMIC_ENTRY",
+      "EDGETUNNEL_API",
+      "CFIP",
+      "CFPORT",
+      "NAME"
+    ]
+  }
+}
