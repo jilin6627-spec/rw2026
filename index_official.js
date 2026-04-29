@@ -525,18 +525,6 @@ async function uploadNodes() {
   }
 }
 
-// ========== 11. 访问任务 ==========
-
-function AddVisitTask() {
-  if (!AUTO_ACCESS || !PROJECT_URL) return;
-
-  try {
-    axios.post('https://oooo.serv00.net/add-url', { url: PROJECT_URL })
-      .then(() => log('VISIT', '自动访问任务已提交', 'success'))
-      .catch(err => log('WARN', `自动访问失败: ${err.message}`, 'warn'));
-  } catch (e) {}
-}
-
 // ========== 12. 清理 ==========
 
 function cleanFiles() {
@@ -634,7 +622,6 @@ async function startserver() {
     const entryIP = await getEntryIP();
     await generateLinks(argoDomain, entryIP);
     await uploadNodes();
-    AddVisitTask();
     cleanFiles();
   });
 }
