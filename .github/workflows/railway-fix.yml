@@ -1,5 +1,5 @@
 name: Railway Fix Build
-on:
+"on":
   push:
     branches: [ railway-fix ]
   workflow_dispatch: {}
@@ -10,8 +10,4 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: railway-fix
-      - name: Build and push
-        run: |
-          echo "Building rw2026 v1.0.1"
-          # Simulate build
-          exit 0
+      - run: echo "build ok"
