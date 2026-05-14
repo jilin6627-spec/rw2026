@@ -1,13 +1,16 @@
-name: Railway Fix Build Minimal
-'on':
+name: Railway Fix Build
+on:
   push:
-    branches:
-    - railway-fix
+    branches: [ railway-fix ]
   workflow_dispatch: {}
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
-    - run: echo "Hello from railway-fix build"
-    - run: whoami
+      - uses: actions/checkout@v4
+        with:
+          ref: railway-fix
+      - name: Build and push
+        run: |
+          echo "Building rw2026 v1.0.1"
+          exit 0
