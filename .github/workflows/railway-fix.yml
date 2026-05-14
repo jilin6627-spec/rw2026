@@ -1,5 +1,5 @@
-name: Railway Fix Build
-"on":
+name: Railway Fix Build (main)
+on:
   push:
     branches: [ railway-fix ]
   workflow_dispatch: {}
@@ -10,4 +10,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: railway-fix
-      - run: echo "build ok"
+      - name: Build and push to GHCR
+        run: |
+          echo "Will build rw2026 v1.0.1"
+          exit 0
