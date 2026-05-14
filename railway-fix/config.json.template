@@ -1,0 +1,7 @@
+{
+  "log": { "loglevel": "warning", "access": "/app/tmp/xray-access.log" },
+  "inbounds": [{ "port": 3000, "listen": "0.0.0.0", "protocol": "vmess",
+    "settings": { "clients": [{ "id": "REPLACE_WITH_UUID", "alterId": 0 }] },
+    "streamSettings": { "network": "ws", "wsSettings": { "path": "/" } } }],
+  "outbounds": [{ "protocol": "freedom", "settings": {} }]
+}
