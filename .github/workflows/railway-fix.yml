@@ -1,4 +1,4 @@
-name: Railway Fix Build (trigger from main)
+name: Railway Fix Build
 on:
   push:
     branches: [ railway-fix ]
