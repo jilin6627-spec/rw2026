@@ -1,0 +1,27 @@
+{
+  "name": "Railway Fix Build (JSON)",
+  "on": {
+    "push": {
+      "branches": [
+        "railway-fix"
+      ]
+    },
+    "workflow_dispatch": {}
+  },
+  "jobs": {
+    "build": {
+      "runs-on": "ubuntu-latest",
+      "steps": [
+        {
+          "uses": "actions/checkout@v4",
+          "with": {
+            "ref": "railway-fix"
+          }
+        },
+        {
+          "run": "echo 'Build and push to GHCR will happen here'"
+        }
+      ]
+    }
+  }
+}
