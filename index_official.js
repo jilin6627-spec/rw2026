@@ -16,7 +16,7 @@ const path = require('path');
 const os = require('os');
 const express = require('express');
 const axios = require('axios');
-const { execSync } = require('child_process');
+const { execSync, spawn } = require('child_process');
 
 const app = express();
 
@@ -346,25 +346,41 @@ function extractZip(zipPath, extractTo) {
   });
 }
 
+const PREBUILT_DIR = '/app/bin';
+
 async function downloadFilesAndRun(callback) {
   const { xrayURL, cloudflaredURL, xrayMachine } = getDownloadInfo();
-  const xrayZipPath = path.join(FILE_PATH, `Xray-linux-${xrayMachine}.zip`);
+  const xrayPath = path.join(FILE_PATH, 'xray');
   const cloudflaredPath = path.join(FILE_PATH, 'cloudflared');
+  const prebuiltXray = path.join(PREBUILT_DIR, 'xray');
+  const prebuiltCF = path.join(PREBUILT_DIR, 'cloudflared');
 
   try {
-    await downloadFile(xrayURL, xrayZipPath);
-    log('EXTRACT', '解压 Xray...', 'info');
-    await extractZip(xrayZipPath, FILE_PATH);
-    const xrayPath = path.join(FILE_PATH, 'xray');
+    // Xray: prefer pre-built, fallback to download
+    if (fs.existsSync(prebuiltXray)) {
+      fs.copyFileSync(prebuiltXray, xrayPath);
+      log('BIN', 'Using pre-built xray', 'success');
+    } else {
+      const xrayZipPath = path.join(FILE_PATH, `Xray-linux-${xrayMachine}.zip`);
+      await downloadFile(xrayURL, xrayZipPath);
+      await extractZip(xrayZipPath, FILE_PATH);
+      try { fs.unlinkSync(xrayZipPath); } catch (e) {}
+    }
     try { execSync(`chmod +x "${xrayPath}"`); } catch (e) {}
 
-    await downloadFile(cloudflaredURL, cloudflaredPath);
-    execSync(`chmod +x "${cloudflaredPath}"`);
-    log('DOWNLOAD', '所有二进制文件下载完成', 'success');
+    // Cloudflared: prefer pre-built, fallback to download
+    if (fs.existsSync(prebuiltCF)) {
+      fs.copyFileSync(prebuiltCF, cloudflaredPath);
+      log('BIN', 'Using pre-built cloudflared', 'success');
+    } else {
+      await downloadFile(cloudflaredURL, cloudflaredPath);
+    }
+    try { execSync(`chmod +x "${cloudflaredPath}"`); } catch (e) {}
 
+    log('BIN', 'All binaries ready', 'success');
     if (callback) await callback();
   } catch (error) {
-    log('ERROR', `下载失败: ${error.message}`, 'error');
+    log('ERROR', `Binary setup failed: ${error.message}`, 'error');
     process.exit(1);
   }
 }
@@ -572,53 +588,63 @@ function cleanFiles() {
 
 // ========== 13. 启动 Cloudflared ==========
 
-function startCloudflared(argoDomain) {
+function startCloudflared() {
   return new Promise((resolve, reject) => {
     const cloudflaredPath = path.join(FILE_PATH, 'cloudflared');
-    let args = [
-      'tunnel', '--no-autoupdate',
-      '--url', `http://localhost:${ARGO_PORT}`,
-      '--logfile', path.join(FILE_PATH, 'boot.log'),
-      '--metrics', 'localhost:20000'
-    ];
+    let args;
 
-    if (ARGO_AUTH) {
-      if (ARGO_AUTH.includes('TunnelSecret')) {
-        args = ['tunnel', '--no-autoupdate', '--config', path.join(FILE_PATH, 'tunnel.yml')];
-      } else {
-        args.push('--token', ARGO_AUTH);
-      }
+    if (ARGO_AUTH && ARGO_AUTH.includes('TunnelSecret')) {
+      args = ['tunnel', '--no-autoupdate', '--config', path.join(FILE_PATH, 'tunnel.yml'), 'run'];
+    } else if (ARGO_AUTH) {
+      args = ['tunnel', '--no-autoupdate', '--protocol', 'http2', 'run', '--token', ARGO_AUTH];
+    } else {
+      args = [
+        'tunnel', '--no-autoupdate', '--protocol', 'http2',
+        '--logfile', path.join(FILE_PATH, 'boot.log'),
+        '--loglevel', 'info',
+        '--url', `http://localhost:${ARGO_PORT}`
+      ];
     }
 
-    log('TUNNEL', '启动 Cloudflared 隧道...', 'info');
-    cloudflaredProcess = execSync(cloudflaredPath + ' ' + args.join(' '), {
-      stdio: ['ignore', 'pipe', 'pipe'], cwd: FILE_PATH, detached: true
+    log('TUNNEL', `Starting cloudflared: ${args.join(' ')}`, 'info');
+    cloudflaredProcess = spawn(cloudflaredPath, args, {
+      cwd: FILE_PATH, stdio: 'ignore', detached: true
     });
+    cloudflaredProcess.unref();
+    log('TUNNEL', `Cloudflared started (PID: ${cloudflaredProcess.pid})`, 'success');
 
-    let retries = 30;
-    const checkInterval = setInterval(() => {
-      try {
-        const bootLog = fs.readFileSync(path.join(FILE_PATH, 'boot.log'), 'utf-8');
-        if (bootLog.includes('~ tunnel') || bootLog.includes('trycloudflare.com')) {
+    // Wait for tunnel to be ready
+    if (ARGO_AUTH && ARGO_DOMAIN) {
+      // Fixed tunnel, no need to parse boot.log
+      setTimeout(() => resolve(ARGO_DOMAIN), 5000);
+    } else {
+      // Temporary tunnel, parse boot.log for domain
+      let retries = 30;
+      const checkInterval = setInterval(() => {
+        try {
+          const bootLog = fs.readFileSync(path.join(FILE_PATH, 'boot.log'), 'utf-8');
+          const match = bootLog.match(/https?:\/\/([a-z0-9-]+\.trycloudflare\.com)/);
+          if (match) {
+            clearInterval(checkInterval);
+            resolve(match[1]);
+          }
+        } catch (e) {}
+        retries--;
+        if (retries <= 0) {
           clearInterval(checkInterval);
-          resolve(argoDomain);
+          reject(new Error('Tunnel startup timeout'));
         }
-      } catch (e) {}
-      retries--;
-      if (retries <= 0) {
-        clearInterval(checkInterval);
-        reject(new Error('隧道启动超时'));
-      }
-    }, 2000);
+      }, 2000);
+    }
   });
 }
 
 // ========== 14. 主流程 ==========
 
 async function startserver() {
-  log('START', '========== rw2026 启动 ==========', 'info');
+  log('START', '========== Service Starting ==========', 'info');
   log('CONFIG', `UUID: ${(UUID || '').substring(0, 8)}...`, 'info');
-  log('CONFIG', `ARGO_DOMAIN: ${ARGO_DOMAIN || '临时隧道'}`, 'info');
+  log('CONFIG', `ARGO_DOMAIN: ${ARGO_DOMAIN || 'temporary tunnel'}`, 'info');
 
   cleanupOldFiles();
   deleteNodes();
@@ -627,20 +653,45 @@ async function startserver() {
   await downloadFilesAndRun(async () => {
     await generateConfig();
 
-    log('XRAY', '启动 Xray-core...', 'info');
+    // Launch xray as background process using spawn
     const xrayPath = path.join(FILE_PATH, 'xray');
-    xrayProcess = execSync(`${xrayPath} -c ${path.join(FILE_PATH, 'config.json')}`, {
-      stdio: ['ignore', 'pipe', 'pipe'], cwd: FILE_PATH, detached: true
+    const cfgPath = path.join(FILE_PATH, 'config.json');
+
+    // Diagnostics
+    log('XRAY', `Binary exists: ${fs.existsSync(xrayPath)}, size: ${fs.existsSync(xrayPath) ? fs.statSync(xrayPath).size : 0}`, 'info');
+    log('XRAY', `Config exists: ${fs.existsSync(cfgPath)}`, 'info');
+    try { execSync(`chmod +x "${xrayPath}"`); } catch(e) {}
+
+    // Test run to check if binary works
+    try {
+      const ver = execSync(`"${xrayPath}" version 2>&1`, { timeout: 5000 }).toString().trim();
+      log('XRAY', `Version: ${ver.split('\n')[0]}`, 'success');
+    } catch (verErr) {
+      log('ERROR', `Xray binary test failed: ${verErr.message}`, 'error');
+      // Try to get more info
+      try { log('DEBUG', execSync(`file "${xrayPath}" 2>&1`).toString().trim(), 'info'); } catch(e) {}
+      try { log('DEBUG', execSync(`ldd "${xrayPath}" 2>&1`).toString().trim(), 'info'); } catch(e) {}
+    }
+
+    log('XRAY', `Starting xray: ${xrayPath}`, 'info');
+    xrayProcess = spawn(xrayPath, ['-c', cfgPath], {
+      cwd: FILE_PATH, stdio: ['ignore', 'pipe', 'pipe'], detached: true
     });
-    log('XRAY', `Xray 已启动 (PID: ${xrayProcess.pid})`, 'success');
+    xrayProcess.stderr.on('data', (d) => log('XRAY-ERR', d.toString().trim(), 'error'));
+    xrayProcess.stdout.on('data', (d) => log('XRAY-OUT', d.toString().trim(), 'info'));
+    xrayProcess.on('error', (err) => log('ERROR', `Xray spawn error: ${err.message}`, 'error'));
+    xrayProcess.on('exit', (code) => { if (code) log('WARN', `Xray exited with code ${code}`, 'warn'); });
+    log('XRAY', `Xray started (PID: ${xrayProcess.pid})`, 'success');
 
-    await new Promise(r => setTimeout(r, 3000));
+    await new Promise(r => setTimeout(r, 2000));
 
-    const argoDomain = await extractDomains();
+    // Launch cloudflared and get domain
+    const argoDomain = await startCloudflared();
     if (!argoDomain) {
-      log('ERROR', '无法获取有效域名，退出', 'error');
+      log('ERROR', 'Failed to get tunnel domain', 'error');
       process.exit(1);
     }
+    log('DOMAIN', `Tunnel domain: ${argoDomain}`, 'success');
 
     const entryIP = await getEntryIP();
     await generateLinks(argoDomain, entryIP);
@@ -652,10 +703,10 @@ async function startserver() {
 // ========== 15. 信号处理 ==========
 
 function handleShutdown(signal) {
-  log('SHUTDOWN', `收到信号 ${signal}，正在关闭服务...`, 'warn');
+  log('SHUTDOWN', `Received ${signal}, shutting down...`, 'warn');
   try {
-    if (xrayProcess) { process.kill(-xrayProcess.pid); log('SHUTDOWN', 'Xray 已停止', 'info'); }
-    if (cloudflaredProcess) { process.kill(-cloudflaredProcess.pid); log('SHUTDOWN', 'Cloudflared 已停止', 'info'); }
+    if (xrayProcess && !xrayProcess.killed) { xrayProcess.kill(); log('SHUTDOWN', 'Xray stopped', 'info'); }
+    if (cloudflaredProcess && !cloudflaredProcess.killed) { cloudflaredProcess.kill(); log('SHUTDOWN', 'Cloudflared stopped', 'info'); }
   } catch (e) {}
   process.exit(0);
 }
