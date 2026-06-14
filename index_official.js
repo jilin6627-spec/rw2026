@@ -40,19 +40,48 @@ const CFIP = process.env.CFIP || 'cdns.doon.eu.org';
 const CFPORT = process.env.CFPORT || '443';
 const NAME = process.env.NAME || '';
 
-// 多优选域名列表（逗号分隔），每个域名随机分配一种协议
-const CFIPS = (process.env.CFIPS || 'www.visa.cn,mfa.gov.ua,www.shopify.com,store.ubi.com,staticdelivery.nexusmods.com,time.is,icook.hk,icook.tw')
-  .split(',').map(s => s.trim()).filter(Boolean);
+// 默认优选域名（30+ 个，含官方 + 三网优选 + 社区维护）
+const DEFAULT_CFIPS = [
+  // 官方优选
+  'www.visa.cn', 'mfa.gov.ua', 'www.shopify.com', 'store.ubi.com',
+  'staticdelivery.nexusmods.com', 'time.is', 'icook.hk', 'icook.tw',
+  // 三网优选（社区维护）
+  'cf.090227.xyz', 'cf.tencentapp.cn', 'cloudflare-dl.byoip.top',
+  'cf.877774.xyz', 'saas.sin.fan',
+  // 更多社区域名
+  'bestcf.030101.xyz', 'cf.cloudflare.182682.xyz', 'cdn.2020111.xyz',
+  'cdns.doon.eu.org', 'cf.0sm.com', 'cf.877771.xyz', 'cf.900501.xyz',
+  'cfip.1323123.xyz', 'cfip.cfcdn.vip', 'cloudflare-ip.mofashi.ltd',
+  'fn.130519.xyz', 'freeyx.cloudflare88.eu.org', 'nrtcfdns.zone.id',
+  '777.ai7777777.xyz'
+];
 
-// ✨ 新增：动态优选配置
+// 用户自定义 CFIPS 优先，否则使用默认列表
+let CFIPS = process.env.CFIPS
+  ? process.env.CFIPS.split(',').map(s => s.trim()).filter(Boolean)
+  : [...DEFAULT_CFIPS];
+
+// 动态优选配置
 const EDGETUNNEL_API = process.env.EDGETUNNEL_API || '';
 const USE_DYNAMIC_ENTRY = process.env.USE_DYNAMIC_ENTRY === 'true';
 const EDGETUNNEL_FALLBACK = process.env.EDGETUNNEL_FALLBACK === 'true';
 const CACHE_TTL = 6 * 60 * 60 * 1000;  // 6小时缓存
 
+// BestCF 动态域名源（你的仓库，每 12h 自动更新）
+const BESTCF_URL = process.env.BESTCF_URL || 'https://raw.githubusercontent.com/hy3188/BestCF/main/bestcf-domain.txt';
+// cf.090227.xyz API 优选 IP（电信/联通/移动）
+const CF_API_URLS = [
+  'https://cf.090227.xyz/ct?ips=3',
+  'https://cf.090227.xyz/cu?ips=3',
+  'https://cf.090227.xyz/cmcc?ips=3'
+];
+const USE_DYNAMIC_DOMAINS = process.env.USE_DYNAMIC_DOMAINS !== 'false'; // 默认启用
+
 // ========== 2. 全局状态 ==========
 let cachedBestIP = null;
 let cacheTime = 0;
+let cachedDomains = null;
+let domainCacheTime = 0;
 let xrayProcess = null;
 let cloudflaredProcess = null;
 
@@ -197,6 +226,67 @@ async function getEntryIP() {
   }
 
   return entryIP;
+}
+
+// ========== 4b. 动态优选域名拉取 ==========
+
+async function fetchDynamicDomains() {
+  if (!USE_DYNAMIC_DOMAINS) {
+    log('DOMAIN', 'Dynamic domain fetching disabled', 'info');
+    return;
+  }
+
+  // Check cache
+  if (cachedDomains && (Date.now() - domainCacheTime) < CACHE_TTL) {
+    CFIPS = cachedDomains;
+    log('DOMAIN', `Using cached domains: ${CFIPS.length} entries`, 'info');
+    return;
+  }
+
+  const newDomains = new Set(CFIPS);
+  let fetchedCount = 0;
+
+  // Source 1: BestCF repository (bestcf-domain.txt)
+  try {
+    log('DOMAIN', `Fetching from BestCF: ${BESTCF_URL}`, 'info');
+    const resp = await axios.get(BESTCF_URL, { timeout: 8000 });
+    const lines = resp.data.split('\n').filter(l => l.trim());
+    for (const line of lines) {
+      const domain = line.split('#')[0].trim();
+      if (domain && isValidDomain(domain)) {
+        newDomains.add(domain);
+        fetchedCount++;
+      }
+    }
+    log('DOMAIN', `BestCF: +${fetchedCount} domains`, 'success');
+  } catch (e) {
+    log('WARN', `BestCF fetch failed: ${e.message}`, 'warn');
+  }
+
+  // Source 2: cf.090227.xyz API (preferred IPs by ISP)
+  for (const apiUrl of CF_API_URLS) {
+    try {
+      const resp = await axios.get(apiUrl, { timeout: 5000 });
+      const lines = resp.data.split('\n').filter(l => l.trim());
+      let apiCount = 0;
+      for (const line of lines) {
+        const ip = line.split('#')[0].trim();
+        if (ip && (isValidIP(ip) || isValidDomain(ip))) {
+          newDomains.add(ip);
+          apiCount++;
+        }
+      }
+      const label = apiUrl.includes('/ct') ? 'CT' : apiUrl.includes('/cu') ? 'CU' : 'CMCC';
+      log('DOMAIN', `API ${label}: +${apiCount} IPs`, 'success');
+    } catch (e) {
+      log('WARN', `API fetch failed (${apiUrl}): ${e.message}`, 'warn');
+    }
+  }
+
+  CFIPS = [...newDomains];
+  cachedDomains = CFIPS;
+  domainCacheTime = Date.now();
+  log('DOMAIN', `Total preferred entries: ${CFIPS.length} (default: ${DEFAULT_CFIPS.length}, dynamic: ${CFIPS.length - DEFAULT_CFIPS.length})`, 'success');
 }
 
 // ========== 5. 清理函数 ==========
@@ -694,6 +784,7 @@ async function startserver() {
     log('DOMAIN', `Tunnel domain: ${argoDomain}`, 'success');
 
     const entryIP = await getEntryIP();
+    await fetchDynamicDomains();
     await generateLinks(argoDomain, entryIP);
     await uploadNodes();
     cleanFiles();
