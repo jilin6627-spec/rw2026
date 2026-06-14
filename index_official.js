@@ -40,6 +40,10 @@ const CFIP = process.env.CFIP || 'cdns.doon.eu.org';
 const CFPORT = process.env.CFPORT || '443';
 const NAME = process.env.NAME || '';
 
+// 多优选域名列表（逗号分隔），每个域名随机分配一种协议
+const CFIPS = (process.env.CFIPS || 'www.visa.cn,mfa.gov.ua,www.shopify.com,store.ubi.com,staticdelivery.nexusmods.com,time.is,icook.hk,icook.tw')
+  .split(',').map(s => s.trim()).filter(Boolean);
+
 // ✨ 新增：动态优选配置
 const EDGETUNNEL_API = process.env.EDGETUNNEL_API || '';
 const USE_DYNAMIC_ENTRY = process.env.USE_DYNAMIC_ENTRY === 'true';
@@ -431,43 +435,62 @@ async function extractDomains() {
 
 // ========== 9. 订阅生成 ==========
 
+// 为单个域名生成指定协议的节点链接
+function buildNodeLink(protocol, ip, port, uuid, argoDomain, displayName) {
+  if (protocol === 'vless') {
+    return `vless://${uuid}@${ip}:${port}?encryption=none&security=tls&sni=${argoDomain}&fp=firefox&type=ws&host=${argoDomain}&path=%2Fvless-argo%3Fed%3D2560#${encodeURIComponent(displayName)}`;
+  }
+  if (protocol === 'vmess') {
+    const obj = {
+      v: '2', ps: displayName, add: ip, port: port.toString(),
+      id: uuid, aid: '0', net: 'ws', type: 'none', host: argoDomain,
+      path: '/vmess-argo', tls: 'tls', sni: argoDomain, fp: 'firefox'
+    };
+    return `vmess://${Buffer.from(JSON.stringify(obj)).toString('base64')}`;
+  }
+  // trojan
+  return `trojan://${uuid}@${ip}:${port}?security=tls&sni=${argoDomain}&fp=firefox&type=ws&host=${argoDomain}&path=%2Ftrojan-argo%3Fed%3D2560#${encodeURIComponent(displayName)}`;
+}
+
 async function generateLinks(argoDomain, entryIP) {
   const ISP = await getMetaInfo();
-  const nodeName = NAME ? `${NAME}-${ISP}` : ISP;
+  const baseName = NAME ? `${NAME}-${ISP}` : ISP;
+  const protocols = ['vless', 'vmess', 'trojan'];
+  const allLinks = [];
 
-  log('GEN', `开始生成订阅，入口IP: ${entryIP}`, 'info');
+  log('GEN', `开始生成订阅，默认入口: ${entryIP}，优选域名数: ${CFIPS.length}`, 'info');
 
-  let vlessLink = `vless://${UUID}@${entryIP}:${CFPORT}?`;
-  vlessLink += `encryption=none&security=tls&sni=${argoDomain}&fp=firefox`;
-  vlessLink += `&type=ws&host=${argoDomain}&path=%2Fvless-argo%3Fed%3D2560`;
-  vlessLink += `#${encodeURIComponent(nodeName)}`;
+  // 1. 为每个优选域名随机分配一种协议
+  for (const cfip of CFIPS) {
+    const proto = protocols[Math.floor(Math.random() * protocols.length)];
+    const shortLabel = cfip.replace(/^www\./, '').split('.')[0];
+    const displayName = `${baseName}-${shortLabel}`;
+    const link = buildNodeLink(proto, cfip, CFPORT, UUID, argoDomain, displayName);
+    allLinks.push(link);
+    log('GEN', `${proto.toUpperCase().padEnd(6)} → ${cfip} (${displayName})`, 'info');
+  }
 
-  const vmessObj = {
-    v: '2', ps: nodeName, add: entryIP, port: CFPORT.toString(),
-    id: UUID, aid: '0', net: 'ws', type: 'none', host: argoDomain,
-    path: '/vmess-argo', tls: 'tls', sni: argoDomain, fp: 'firefox'
-  };
-  const vmessLink = `vmess://${Buffer.from(JSON.stringify(vmessObj)).toString('base64')}`;
+  // 2. 动态 entryIP 若与优选列表不同，额外生成完整三协议节点
+  if (entryIP && !CFIPS.includes(entryIP)) {
+    for (const proto of protocols) {
+      const link = buildNodeLink(proto, entryIP, CFPORT, UUID, argoDomain, `${baseName}-dynamic`);
+      allLinks.push(link);
+    }
+    log('GEN', `动态入口 ${entryIP} 已生成 3 条节点`, 'info');
+  }
 
-  let trojanLink = `trojan://${UUID}@${entryIP}:${CFPORT}?`;
-  trojanLink += `security=tls&sni=${argoDomain}&fp=firefox`;
-  trojanLink += `&type=ws&host=${argoDomain}&path=%2Ftrojan-argo%3Fed%3D2560`;
-  trojanLink += `#${encodeURIComponent(nodeName)}`;
-
-  const subContent = `\n${vlessLink}\n${vmessLink}\n${trojanLink}\n`;
+  const subContent = '\n' + allLinks.join('\n') + '\n';
   const subBase64 = Buffer.from(subContent).toString('base64');
 
   fs.writeFileSync(path.join(FILE_PATH, 'sub.txt'), subBase64);
-  log('FILE', 'sub.txt (base64) 已写入', 'success');
+  log('FILE', `sub.txt 已写入，共 ${allLinks.length} 条节点`, 'success');
 
   console.log('\n========== 订阅内容 (Base64) ==========');
   console.log(subBase64);
   console.log('========================================\n');
 
   console.log('\n========== 节点详情 ==========');
-  console.log(`VLESS: ${vlessLink}`);
-  console.log(`VMESS: ${vmessLink}`);
-  console.log(`TROJAN: ${trojanLink}`);
+  allLinks.forEach(l => console.log(l));
   console.log('==============================\n');
 
   app.get(`/${SUB_PATH}`, (req, res) => {
@@ -476,7 +499,7 @@ async function generateLinks(argoDomain, entryIP) {
   });
 
   app.get('/health', (req, res) => {
-    res.json({ status: 'ok', entryIP, timestamp: new Date().toISOString() });
+    res.json({ status: 'ok', entryIP, nodes: allLinks.length, timestamp: new Date().toISOString() });
   });
 }
 
